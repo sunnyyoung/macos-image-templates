@@ -7,7 +7,7 @@ packer {
   }
 }
 
-variable "macos_version" {
+variable "vm_name" {
   type = string
 }
 
@@ -37,11 +37,6 @@ variable "expected_runtimes_file" {
   description = "Path to file containing expected simulator runtimes. If empty, runtime verification is skipped."
 }
 
-variable "tag" {
-  type    = string
-  default = ""
-}
-
 variable "disk_size" {
   type    = number
   default = 140
@@ -52,28 +47,21 @@ variable "disk_free_mb" {
   default = 15000
 }
 
-variable "android_sdk_tools_version" {
-  type    = string
-  default = "14742923" # https://developer.android.com/studio#command-line-tools-only
-}
-
 source "tart-cli" "tart" {
   // The workflow sizes the VM before boot; only the guest daemon resizes APFS.
   recovery_partition = "keep"
-  // use tag or the last element of the xcode_version list
-  vm_name      = "${var.macos_version}-xcode:${var.tag != "" ? var.tag : var.xcode_version[0]}"
-  cpu_count    = 4
-  memory_gb    = 8
-  headless     = true
-  ssh_password = "admin"
-  ssh_username = "admin"
-  ssh_timeout  = "120s"
+  vm_name            = var.vm_name
+  cpu_count          = 4
+  memory_gb          = 8
+  headless           = true
+  ssh_password       = "admin"
+  ssh_username       = "admin"
+  ssh_timeout        = "120s"
 }
 
 locals {
   xcode_install_provisioners = [
     for version in reverse(sort(var.xcode_version)) : {
-      type = "shell"
       inline = [
         "source ~/.zprofile",
         "sudo xcodes install ${version} --experimental-unxip --path /Users/admin/Downloads/Xcode_${version}.xip --select --empty-trash",
@@ -105,56 +93,14 @@ build {
       "done",
       "[[ $size_kb -ge $minimum_kb ]] || { echo 'APFS did not expand to ${var.disk_size} GB within 120 seconds.' >&2; exit 1; }",
       "source ~/.zprofile",
-      "brew --version",
-      "brew update",
-      "brew upgrade",
-      "brew install codex",
-      "brew install --cask claude-code",
-      "brew install --cask amazon-q"
-    ]
-  }
-
-  // Re-install the GitHub Actions runner
-  provisioner "shell" {
-    script = "scripts/install-actions-runner.sh"
-  }
-
-  // make sure our workaround from base is still valid
-  provisioner "shell" {
-    inline = [
-      "sudo ln -s /Users/admin /Users/runner || true"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "brew install openjdk@17",
-      "echo 'export PATH=\"/opt/homebrew/opt/openjdk@17/bin:$PATH\"' >> ~/.zprofile",
-      "echo 'export ANDROID_HOME=$HOME/android-sdk' >> ~/.zprofile",
-      "echo 'export ANDROID_SDK_ROOT=$ANDROID_HOME' >> ~/.zprofile",
-      "echo 'export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator' >> ~/.zprofile",
-      "source ~/.zprofile",
-      "wget -q https://dl.google.com/android/repository/commandlinetools-mac-${var.android_sdk_tools_version}_latest.zip -O android-sdk-tools.zip",
-      "mkdir -p $ANDROID_HOME/cmdline-tools/",
-      "unzip -q android-sdk-tools.zip -d $ANDROID_HOME/cmdline-tools/",
-      "rm android-sdk-tools.zip",
-      "mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest",
-      "yes | sdkmanager --licenses",
-      "yes | sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
       "brew install xcodes",
+      "brew cleanup",
       "xcodes version",
     ]
   }
 
   provisioner "file" {
-    sources     = [for version in var.xcode_version : pathexpand("~/XcodesCache/Xcode_${version}.xip")]
+    sources     = [for version in var.xcode_version : "/tmp/Xcode_${version}.xip"]
     destination = "/Users/admin/Downloads/"
   }
 
@@ -235,23 +181,6 @@ build {
     )
   }
 
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "brew install libimobiledevice ideviceinstaller ios-deploy carthage",
-      "brew install xcbeautify swiftformat swiftlint swiftgen licenseplist",
-      "brew install mint",
-      "git clone --depth 1 https://github.com/tuist/homebrew-tuist.git \"$(brew --repository)/Library/Taps/tuist/homebrew-tuist\"",
-      "rm -rf \"$(brew --repository)/Library/Taps/tuist/homebrew-tuist/Casks\"",
-      "tuist_version=$(ruby -ne 'if $_ =~ %r{/download/([^/]+)/}; puts $1; exit; end' \"$(brew --repository)/Library/Taps/tuist/homebrew-tuist/Aliases/tuist\") && brew trust --formula \"tuist/tuist/tuist@$tuist_version\" && brew install --formula \"tuist/tuist/tuist@$tuist_version\"",
-      "gem update",
-      "gem install fastlane",
-      "gem install cocoapods",
-      "gem install xcpretty",
-      "gem uninstall --ignore-dependencies ffi && gem install ffi -- --enable-libffi-alloc"
-    ]
-  }
-
   // Copy expected runtimes file if provided
   dynamic "provisioner" {
     for_each = var.expected_runtimes_file != "" ? [1] : []
@@ -276,31 +205,6 @@ build {
     }
   }
 
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "echo 'export FLUTTER_HOME=$HOME/flutter' >> ~/.zprofile",
-      "echo 'export PATH=$HOME/flutter:$HOME/flutter/bin/:$HOME/flutter/bin/cache/dart-sdk/bin:$PATH' >> ~/.zprofile",
-      "source ~/.zprofile",
-      "git clone https://github.com/flutter/flutter.git $FLUTTER_HOME",
-      "cd $FLUTTER_HOME",
-      "git checkout stable",
-      "flutter doctor --android-licenses",
-      "flutter doctor",
-      "flutter precache",
-    ]
-  }
-
-  # useful utils for mobile development
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "brew install graphicsmagick imagemagick",
-      "brew install wix/brew/applesimutils",
-      "brew install gnupg"
-    ]
-  }
-
   # inspired by https://github.com/actions/runner-images/blob/fb3b6fd69957772c1596848e2daaec69eabca1bb/images/macos/provision/configuration/configure-machine.sh#L33-L61
   provisioner "shell" {
     inline = [
@@ -315,13 +219,6 @@ build {
     ]
   }
 
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "flutter doctor"
-    ]
-  }
-
   // check there is at least 15GB of free space and fail if not
   provisioner "shell" {
     inline = [
@@ -329,14 +226,6 @@ build {
       "df -h",
       "export FREE_MB=$(df -m | awk '{print $4}' | head -n 2 | tail -n 1)",
       "[[ $FREE_MB -gt ${var.disk_free_mb} ]] && echo OK || exit 1"
-    ]
-  }
-
-  // some other health checks
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "test -d /Users/runner"
     ]
   }
 
@@ -360,40 +249,6 @@ build {
       "source ~/.zprofile",
       "xcrun simctl runtime dyld_shared_cache update --all || sleep 180",
       "xcrun simctl list -v"
-    ]
-  }
-
-  # Compatibility with GitHub Actions Runner Images, where
-  # /usr/local/bin belongs to the default user. Also see [2].
-  #
-  # [1]: https://github.com/actions/runner-images/blob/6bbddd20d76d61606bea5a0133c950cc44c370d3/images/macos/scripts/build/configure-machine.sh#L96
-  # [2]: https://github.com/actions/runner-images/discussions/7607
-  provisioner "shell" {
-    inline = [
-      "sudo chown admin /usr/local/bin"
-    ]
-  }
-
-  // Install setup-info-generator
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "brew install cirruslabs/cli/setup-info-generator"
-    ]
-  }
-
-  // Copy setup info template
-  provisioner "file" {
-    source      = "data/setup-info-template.json"
-    destination = "~/setup-info-template.json"
-  }
-
-  // Generate setup info
-  provisioner "shell" {
-    inline = [
-      "source ~/.zprofile",
-      "cat ~/setup-info-template.json | setup-info-generator > ~/actions-runner/.setup_info",
-      "rm ~/setup-info-template.json"
     ]
   }
 }

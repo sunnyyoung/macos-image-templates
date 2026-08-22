@@ -116,7 +116,8 @@ expect_success() {
     "$TCC_TEST_SYSTEM_DB" "$user_database" "$TCC_TEST_SYSTEM_DB" "$user_database")
   assert_equal "$expected_writes" "$(< "$TCC_TEST_ROOT/writes")"
   for database in system user; do
-    assert_equal 18 "$("$TCC_TEST_SQLITE" "$TCC_TEST_ROOT/$database.db" 'SELECT count(*) FROM access WHERE auth_value=2;')"
+    assert_equal 20 "$("$TCC_TEST_SQLITE" "$TCC_TEST_ROOT/$database.db" 'SELECT count(*) FROM access WHERE auth_value=2;')"
+    assert_equal 2 "$("$TCC_TEST_SQLITE" "$TCC_TEST_ROOT/$database.db" "SELECT count(*) FROM access WHERE service='kTCCServiceAppleEvents' AND indirect_object_identifier='com.apple.finder';")"
     assert_equal 4 "$("$TCC_TEST_SQLITE" "$TCC_TEST_ROOT/$database.db" "SELECT count(*) FROM access WHERE client='$TCC_TEST_AGENT' AND client_type=1;")"
     assert_equal 1 "$("$TCC_TEST_SQLITE" "$TCC_TEST_ROOT/$database.db" "SELECT count(*) FROM access WHERE client='org.python.python' AND service='kTCCServiceMicrophone';")"
   done
